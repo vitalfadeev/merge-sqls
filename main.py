@@ -36,6 +36,15 @@ SET time_zone = "+00:00";
 
 """)
 
+def finish_sql(outfile):
+    with open(outfile, "a") as fout:
+        fout.write("""
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+""");
+
+
 def one_file(infile, outfile):
     state = "SEARCH_INSERT"
 
@@ -121,3 +130,4 @@ def parse_args():
 remove_old_outfile(outfile)
 init_outfile(infiles, outfile, table)
 merge_sql(infiles, outfile, table)
+finish_sql(outfile)
