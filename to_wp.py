@@ -131,10 +131,16 @@ for file in onlyfiles:
     title = title.strip()
     title = title[:55]
 
-    ok = send_post(wp, title, html)
+    try:
+        ok = send_post(wp, title, html)
+        
+    except Fault as e:
+        print("error:", str(e).encode("utf-8"))
+        ok = False
 
     if ok:
         print("ok")
+        
         if need_delete:
             os.remove(fullname)
     else:

@@ -6,10 +6,6 @@ import os
 import sys
 import codecs
 
-line_terminator = ';'
-#sys.stdout = codecs.getwriter('utf8')(sys.stdout)
-
-
 def print_usage():
     print("Usage: " + __file__ + " -i file1.sql -i file2.sql -i file3.sql -o htmls -t service")
     print("       -i <file>    Input file")
@@ -75,62 +71,49 @@ def parse_args():
 
 
 class SQLReader:
-	STATE_NONE = 0
-	STATE_COMMENT = 1
-	STATE_KEYWORD = 3
-	
-	repalce_htmls = {
-		r"\r": " ",
-		r"\n": " ",
-	}
-	
 	def __init__(self, filein):
 		self.fin = open(filein, "r", encoding='utf8')
 		print(filein + " opened")
-		self.state = self.STATE_NONE
-		self.prevc = ""
 		
-	def read_in_back_brackets(self):
+	def read_in_back_quotes(self, prevc, c):
 		s = ""
-		
+
+		prevc = c
 		c = self.fin.read(1)
 
-		while (c):
-			if c == '`':
-				s += c
+		while c:
+			if prevc != "\\" and c == "`":
 				break
 			
 			s += c
-			self.prevc = c
+			prevc = c
 			c = self.fin.read(1)
 		
-		return s
+		return (s, prevc, c)
 	
-	def read_in_single_brackets(self):
+	def read_in_single_quotes(self, prevc, c):
 		s = ""
-		
+
+		prevc = c
 		c = self.fin.read(1)
 
-		while (c):
-			if c == "'" and self.prevc != "\\":
-				self.prevc = c
-				s += c
+		while c:
+			if prevc != "\\" and c == "'":
 				break
 			
-			self.prevc = c
 			s += c
+			prevc = c
 			c = self.fin.read(1)
 		
-		return s
+		return (s, prevc, c)
 	
 	def read_c_comment(self):
 		s = ""
-		
+		self.prevc = "*"
 		c = self.fin.read(1)
 
-		while (c):
+		while c:
 			if c == '/' and self.prevc == "*":
-				s += c
 				self.prevc = c
 				break
 			
@@ -141,13 +124,12 @@ class SQLReader:
 		return s
 	
 	def read_comment(self):
-		s = ""
-		
+		s = ""		
+		self.prevc = "-"
 		c = self.fin.read(1)
 
-		while (c):
+		while c:
 			if c == '\n' or c == '\r':
-				s += c
 				self.prevc = c
 				break
 			
@@ -157,180 +139,182 @@ class SQLReader:
 		
 		return s
 		
-	def get_single_quoted_value(self, s):
-		#print(("IN: " + s).encode('utf-8'))
-		v = ""
-		prevc = ""
-		i = 0
-		
-		while i < len(s):
-			if s[i]== "'" and prevc != "\\":
-				return s[:i]
-			
-			prevc = s[i]
-			i += 1
-		
-		return s
-		
-	def split_by_separator(self, s):
-		splited = []
-		v = ""		
-		i = 0
-		
-		while i < len(s):
-			if s[i] == ",":
-				splited.append(v)
-				#print(("VALUE: " + v).encode("utf-8"))
-				v = ""
-				i += 1
+	def read_keyword(self, prevc, c):
+		keyword = c # alpha
+		c = self.fin.read(1)
 
-			elif s[i] == "'":
-				v = self.get_single_quoted_value(s[i+1:])
-				#print(("VALUE QUOTED: " + v).encode("utf-8"))
-				splited.append(v)
-				i += len(v) + 2 + 1
-				v = ""
-
-			else:
-				v += s[i]
-				i += 1
-
-		#print(("VALUE: " + v).encode("utf-8"))
-		splited.append(v)
-		
-		return splited
-		
-	def get_brackets(self, s):
-		i = 0
-		
-		sfrom = 0
-		sto = 0
-		
-		while i < len(s):
-			if s[i] == "(":
-				sfrom = i
-				i += 1
+		while c:
+			if not c.isalnum():
 				break
-			
-			i += 1
-
-		while i < len(s):
-			if s[i] == "'":
-				#print(("PRE: " + s[i:]).encode("utf-8"))
-				v = "'" + self.get_single_quoted_value(s[i+1:]) + "'"
-				#print(("NOBR-VALUE: " + v).encode("utf-8"))
-				i += len(v)
-
-			elif s[i] == ")":
-				sto = i
-				break
-
-			else:
-				i += 1
 				
-		sto = i
+			keyword += c
+
+			prevc = c
+			c = self.fin.read(1)
+			
+		return (keyword, prevc, c)
 		
-		return (sfrom, sto)
+	def read_insert_values(self, prevc, c):
+		values = []
+		value = ""
 		
+		prevc = c
+		c = self.fin.read(1)
+
+		while c:
+			if c == "'":
+				(value, prevc, c) = self.read_in_single_quotes(prevc, c)
+				values.append(value)
+
+			elif c == ",":
+				values.append(value)
+				value = ""
+				
+			elif c == ")":
+				break
+			
+			else:
+				value += c
+
+			prevc = c
+			c = self.fin.read(1)
+			
+		return (values, prevc, c)
+		
+	def read_insert(self, prevc, c):
+		result = []
+		
+		c = prevc # space
+		
+		while c:
+			if c.isalpha():
+				(keyword, prevc, c) = self.read_keyword(prevc, c)
+				result.append(keyword)
+				continue
+			
+			elif c.isspace():
+				pass
+				
+			elif c == '`':
+				(s_in_back_quotes, prevc, c) = self.read_in_back_quotes(prevc, c)
+				result.append(s_in_back_quotes)
+			
+			elif c == "'":
+				s_in_single_quotes = self.read_in_single_quotes(prevc, c)
+				result.append(s_in_single_quotes)
+
+			elif c == "(":
+				(values, prevc, c) = self.read_insert_values(prevc, c)
+				result.append(values)
+
+			elif c == ",":
+				result.append(",")
+			
+			elif c == ';':
+				break
+			
+			prevc = c
+			c = self.fin.read(1)
+
+		return (result, prevc, c)
+		
+	def read_to_terminator(self, prevc, c):
+		s = ""
+
+		while c:
+			if c == ";":
+				break
+				
+			s += c
+
+			prevc = c
+			c = self.fin.read(1)
+			
+		return (s, prevc, c)
+	
+	def read_token(self, outfolder, table):
+		s = ""		
+
+		prevc = ""
+		c = self.fin.read(1)
+
+		while c:
+#			print(c)
+			if c == '-' and prevc == '-':
+				s = self.read_comment()
+				print("COMMENT: " + s[:10])
+				
+			elif prevc == "/" and c == '*':
+				s = self.read_c_comment()
+				print("C-COMMENT: " + s[:10])
+
+			elif c == "\n":
+				pass
+
+			elif c == "\r":
+				pass
+
+			elif c.isalpha():
+				(keyword, prevc, c) = self.read_keyword(prevc, c)
+				print(keyword)
+				
+				if keyword.upper() == "INSERT":
+					(tokens, prevc, c) = self.read_insert(prevc, c)
+					if tokens[1] == table:
+						for t in tokens:
+							if isinstance(t, list):
+								self.on_insert_values(outfolder, t)
+
+				elif keyword.upper() == "DROP":
+					(s, prevc, c) = self.read_to_terminator(prevc, c)
+				
+				elif keyword.upper() == "CREATE":
+					(s, prevc, c) = self.read_to_terminator(prevc, c)
+				
+				elif keyword.upper() == "LOCK":
+					(s, prevc, c) = self.read_to_terminator(prevc, c)
+				
+				elif keyword.upper() == "UNLOCK":
+					(s, prevc, c) = self.read_to_terminator(prevc, c)
+							
+				elif keyword.upper() == "ALTER":
+					(s, prevc, c) = self.read_to_terminator(prevc, c)
+							
+				elif keyword.upper() == "UPDATE":
+					(s, prevc, c) = self.read_to_terminator(prevc, c)
+							
+			prevc = c
+			c = self.fin.read(1)
+
+	def on_insert_values(self, outfolder, values):
+		print(str(values).encode("utf-8")[:50])
+
+		if (len(values) > 1):
+			self.write_html(os.path.join(outfolder, values[0] + ".html"),
+				self.replace_special_chars(values[2]) +
+				"<h3 class=\"widget-title\">Solution</h3>" + 
+				self.replace_special_chars(values[4])
+				)
+
 	def replace_special_chars(self, s):
-		for k,v in self.repalce_htmls.items():
+		repalce_htmls = {
+			r"\r": " ",
+			r"\n": " ",
+		}
+		
+		for k,v in repalce_htmls.items():
 			s = s.replace(k, v)
+			
 		return s
 		
 	def write_html(self, filename, s):
 		writer = open(filename, "w", encoding="utf-8")
-		# writer.write("""
-# <style>
-# .widget-title {
-    # color: #808080;
-    # font-weight: 400;
-    # font-family: "PT Sans", sans-serif;
-    # margin: 0 0 10px 0;
-    # font-size: 16px;
-    # line-height: 20px;
-    # text-transform: uppercase;
-    # background-color: #f5f5f5;
-    # border-bottom: 2px solid #E6E6E6;
-    # padding-bottom: 5px;
-# }
-# </style>
-# """
-# )
+		writer.write('<img src="https://hwsolutiononline.com/img/banner.jpg"/>\n<br>\n')
 		writer.write(s)
 		writer.close()		
 	
-	def write_title(self, filename, s):
-		writer = open(filename, "w", encoding="utf-8")
-		writer.write(s)
-		writer.close()		
 	
-	def read_token(self, outfolder, table):
-		s = ""		
-		c = self.fin.read(1)
-
-		while (c):
-			if self.state == self.STATE_NONE:
-				if c == '-' and self.prevc == '-':
-					s = "-" + self.read_comment()
-					#print("COMMENT: " + s[:10])
-					
-				elif self.prevc == "/" and c == '*':
-					s = "/*" + self.read_c_comment()
-					#print("C-COMMENT: " + s[:10])
-
-				elif c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-					self.state = self.STATE_KEYWORD;
-					s = self.prevc + c
-
-			elif self.state == self.STATE_KEYWORD:
-				if c == "`":
-					s += "`" + self.read_in_back_brackets()
-					self.prevc = "`"
-					
-				elif c == "'":
-					s += "'" + self.read_in_single_brackets()
-					self.prevc = "'"
-					
-				elif c == ";":
-					#s += c
-					self.state = self.STATE_NONE
-					s = s.lstrip();
-					print("KEYWORD: " + s[:20])
-					
-					if s.startswith("INSERT "):
-						print("INSERT")
-						
-						if s.startswith("INSERT INTO `" + table + "`"):
-							print("INSERT INTO `" + table + "`")
-							vpos = s.find("VALUES") + len("VALUES")
-							values = s[vpos:]
-
-							scan = s
-							
-							while scan:
-								(sfrom, sto) = self.get_brackets(scan)
-								unbracked_s = scan[sfrom+1: sto]
-								splited = self.split_by_separator(unbracked_s)
-
-								if (len(splited) > 1):
-									print([splited[0], splited[1].encode("utf-8")])
-									self.write_html(os.path.join(outfolder, splited[0] + ".html"),
-										self.replace_special_chars(splited[2]) +
-										"<h3 class=\"widget-title\">Solution</h3>" + 
-										self.replace_special_chars(splited[4])
-										)
-									#self.write_title(os.path.join(outfolder, splited[0] + ".title"), splited[1])
-									
-								scan = scan[sto:]
-					
-				else:
-					s += c
-				
-			self.prevc = c
-			c = self.fin.read(1)
-
-
-
+#
 (infiles, outfolder, table) = parse_args()
 
 os.makedirs(outfolder, exist_ok=True)
@@ -340,3 +324,4 @@ for infile in infiles:
 	print("Process file: " + infile)
 	reader = SQLReader(infile)
 	reader.read_token(outfolder, table)
+
