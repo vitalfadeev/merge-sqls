@@ -117,8 +117,12 @@ def cleanhtml(raw_html):
 
 onlyfiles = [f for f in listdir(folder) if isfile(join(folder, f)) and f.endswith(".html")]
 
-wp = Client(server, user, password)
-#get_posts(server, user, password)
+try:
+    wp = Client(server, user, password)
+    #get_posts(server, user, password)
+except Exception as e:
+    print("error:", str(e).encode("utf-8"))
+    exit(1)
 
 for file in onlyfiles:
     print(file + "...", end='')
@@ -134,7 +138,8 @@ for file in onlyfiles:
     try:
         ok = send_post(wp, title, html)
         
-    except Fault as e:
+    #except Fault as e:
+    except Exception as e:
         print("error:", str(e).encode("utf-8"))
         ok = False
 
